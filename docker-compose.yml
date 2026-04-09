@@ -9,7 +9,10 @@ services:
     ports:
       - "6677:6677"
     volumes:
-      - /Users/s_mash/Pictures/ScreenShots:/app/media:ro
+      - type: bind
+        source: ${MEDIA_ROOT:-./media}
+        target: /app/media
+        read_only: true
 
   web:
     build:
@@ -18,7 +21,7 @@ services:
       INTERNAL_API_BASE_URL: http://server:6677
       # Optional override. If omitted, the frontend derives the public API host
       # from the browser request and uses port 6677.
-      PUBLIC_API_BASE_URL: http://192.168.1.10:6677
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-}
     ports:
       - "9091:9091"
     depends_on:

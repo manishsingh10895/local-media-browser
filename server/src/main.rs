@@ -150,6 +150,7 @@ enum SortDirection {
 async fn main() -> Result<()> {
     let _ = dotenv();
     let cli_media_root = env::args().nth(1);
+    let env_media_root = env::var("MEDIA_ROOT").ok();
 
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -159,6 +160,7 @@ async fn main() -> Result<()> {
         .parse()
         .context("invalid BIND_ADDR")?;
     let media_root = cli_media_root
+        .clone()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(read_env("MEDIA_ROOT", "../media")));
     let cors_allow_origin = read_env("CORS_ALLOW_ORIGIN", "*");
@@ -184,7 +186,9 @@ async fn main() -> Result<()> {
         .layer(build_cors(&cors_allow_origin)?)
         .layer(TraceLayer::new_for_http());
 
-    info!("serving media root {}", media_root.display());
+    info!("MEDIA_ROOT env value: {:?}", env_media_root);
+    info!("media root CLI override: {:?}", cli_media_root);
+    info!("effective media root: {}", media_root.display());
     info!("listening on http://{}", bind_addr);
 
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
