@@ -1,9 +1,17 @@
 <script lang="ts">
-  import { downloadUrl, mediaUrl } from '$lib/api';
+  import { downloadUrl, mediaUrl, thumbnailUrl } from '$lib/api';
   import VideoPlayer from '$lib/components/VideoPlayer.svelte';
-  import type { MediaItem } from '$lib/types';
+  import type { GridSize, MediaItem } from '$lib/types';
 
-  let { items, apiBaseUrl }: { items: MediaItem[]; apiBaseUrl: string } = $props();
+  let {
+    items,
+    apiBaseUrl,
+    gridSize
+  }: {
+    items: MediaItem[];
+    apiBaseUrl: string;
+    gridSize: GridSize;
+  } = $props();
   let selectedIndex = $state<number | null>(null);
   let touchStartX = 0;
   let touchStartY = 0;
@@ -90,7 +98,7 @@
     <p>No images or videos were found in the configured media folder.</p>
   </div>
 {:else}
-  <section class="grid">
+  <section class={`grid grid-${gridSize}`}>
     {#each items as item, index}
       <article class="card">
         <button
@@ -100,13 +108,11 @@
           onclick={() => openViewer(index)}
         >
           <div class="preview">
-            {#if item.media_type === 'image'}
-              <img src={mediaUrl(item.relative_path, apiBaseUrl)} alt={item.name} loading="lazy" />
-            {:else}
-              <video preload="metadata" muted playsinline>
-                <source src={mediaUrl(item.relative_path, apiBaseUrl)} type={item.mime} />
-              </video>
-            {/if}
+            <img
+              src={thumbnailUrl(item.relative_path, apiBaseUrl, item.modified_ms)}
+              alt={item.name}
+              loading="lazy"
+            />
           </div>
         </button>
 
@@ -203,8 +209,19 @@
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 1.4rem;
+  }
+
+  .grid-compact {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  }
+
+  .grid-comfortable {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+
+  .grid-large {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   }
 
   .card {
@@ -294,6 +311,32 @@
     padding: 1rem 1.05rem 1.1rem;
   }
 
+  .grid-compact .meta {
+    padding: 0.7rem 0.75rem 0.8rem;
+  }
+
+  .grid-compact h2 {
+    font-size: 0.9rem;
+  }
+
+  .grid-compact p {
+    margin-top: 0.3rem;
+    font-size: 0.76rem;
+  }
+
+  .grid-compact .download-link {
+    margin-top: 0.6rem;
+    font-size: 0.72rem;
+  }
+
+  .grid-large .meta {
+    padding: 1.1rem 1.15rem 1.2rem;
+  }
+
+  .grid-large h2 {
+    font-size: 1.06rem;
+  }
+
   h2 {
     margin: 0;
     font-size: 1rem;
@@ -327,8 +370,19 @@
 
   @media (max-width: 640px) {
     .grid {
-      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
       gap: 1rem;
+    }
+
+    .grid-compact {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .grid-comfortable {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .grid-large {
+      grid-template-columns: repeat(1, minmax(0, 1fr));
     }
 
     .card {
@@ -337,6 +391,10 @@
 
     .meta {
       padding: 0.85rem 0.85rem 0.95rem;
+    }
+
+    .grid-compact .preview {
+      aspect-ratio: 1 / 1;
     }
   }
 

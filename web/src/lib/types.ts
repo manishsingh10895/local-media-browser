@@ -25,3 +25,17 @@ export interface BreadcrumbItem {
 
 export type SortField = 'name' | 'date' | 'size';
 export type SortDirection = 'asc' | 'desc';
+export type GridSize = 'compact' | 'comfortable' | 'large';
+
+export interface FolderResponse {
+  current_path: string;
+  breadcrumbs: BreadcrumbItem[];
+  folders: FolderEntry[];
+  media: MediaItem[];
+  next_offset: number | null;
+  total_media_count: number;
+  limit: number;
+  sort_field: SortField;
+  sort_direction: SortDirection;
+  grid_size?: GridSize;
+}
