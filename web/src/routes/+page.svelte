@@ -2,7 +2,7 @@
   import GalleryGrid from "$lib/components/GalleryGrid.svelte";
   import type { MediaItem } from "$lib/types";
 
-  let { data }: { data: { media: MediaItem[] } } = $props();
+  let { data }: { data: { media: MediaItem[]; publicApiBaseUrl: string } } = $props();
 </script>
 
 <svelte:head>
@@ -30,7 +30,7 @@
     </div>
   </header>
 
-  <GalleryGrid items={data.media} />
+  <GalleryGrid items={data.media} apiBaseUrl={data.publicApiBaseUrl} />
 </div>
 
 <style>
@@ -92,30 +92,14 @@
     max-width: 760px;
   }
 
-  .eyebrow {
-    margin: 0 0 0.75rem;
-    color: #f0c48c;
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
-    font-size: 0.75rem;
-    font-family: "Avenir Next", "Segoe UI", sans-serif;
-  }
-
-  h2{
+  .hero-copy h2 {
     margin: 0;
     max-width: 11ch;
     font-size: clamp(2.8rem, 6vw, 4.25rem);
     line-height: 0.93;
     letter-spacing: -0.04em;
     text-wrap: balance;
-  }
-
-  .lede {
-    max-width: 58ch;
-    margin-top: 1.15rem;
-    color: #c2d4df;
-    font-size: 1.08rem;
-    line-height: 1.75;
+    color: #f7f4ef;
   }
 
   .hero-panel {
@@ -173,12 +157,8 @@
       padding: 2.4rem 1rem 3.5rem;
     }
 
-    h1 {
+    .hero-copy h2 {
       font-size: clamp(2.35rem, 11vw, 3.7rem);
-    }
-
-    .lede {
-      font-size: 1rem;
     }
   }
 </style>

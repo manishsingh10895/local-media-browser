@@ -3,7 +3,7 @@
   import VideoPlayer from '$lib/components/VideoPlayer.svelte';
   import type { MediaItem } from '$lib/types';
 
-  let { items }: { items: MediaItem[] } = $props();
+  let { items, apiBaseUrl }: { items: MediaItem[]; apiBaseUrl: string } = $props();
   let selectedIndex = $state<number | null>(null);
   let touchStartX = 0;
   let touchStartY = 0;
@@ -101,10 +101,10 @@
         >
           <div class="preview">
             {#if item.media_type === 'image'}
-              <img src={mediaUrl(item.relative_path)} alt={item.name} loading="lazy" />
+              <img src={mediaUrl(item.relative_path, apiBaseUrl)} alt={item.name} loading="lazy" />
             {:else}
               <video preload="metadata" muted playsinline>
-                <source src={mediaUrl(item.relative_path)} type={item.mime} />
+                <source src={mediaUrl(item.relative_path, apiBaseUrl)} type={item.mime} />
               </video>
             {/if}
           </div>
@@ -150,12 +150,12 @@
           {#if selectedItem.media_type === 'image'}
             <img
               class="viewer-media"
-              src={mediaUrl(selectedItem.relative_path)}
+              src={mediaUrl(selectedItem.relative_path, apiBaseUrl)}
               alt={selectedItem.name}
             />
           {:else}
             <div class="viewer-media viewer-video">
-              <VideoPlayer src={mediaUrl(selectedItem.relative_path)} title={selectedItem.name} />
+              <VideoPlayer src={mediaUrl(selectedItem.relative_path, apiBaseUrl)} title={selectedItem.name} />
             </div>
           {/if}
 
