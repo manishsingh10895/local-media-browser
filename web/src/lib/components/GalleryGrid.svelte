@@ -189,6 +189,10 @@
           >
             ↓
           </a>
+
+          <div class="viewer-filename">
+            <span>{selectedItem.name}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -462,6 +466,31 @@
     right: 4.25rem;
   }
 
+  .viewer-filename {
+    position: absolute;
+    left: 50%;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    max-width: min(90vw, 760px);
+    padding: 0.55rem 0.85rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    background: rgba(9, 16, 25, 0.68);
+    backdrop-filter: blur(8px);
+    color: #eef3f8;
+    font-size: 0.84rem;
+    line-height: 1.2;
+    text-align: center;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.22);
+  }
+
+  .viewer-filename span {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   .nav-button {
     position: absolute;
     top: 50%;
@@ -517,6 +546,12 @@
 
     .download-button {
       right: 3.85rem;
+    }
+
+    .viewer-filename {
+      bottom: 0.85rem;
+      max-width: calc(100vw - 2rem);
+      font-size: 0.78rem;
     }
   }
 </style>
