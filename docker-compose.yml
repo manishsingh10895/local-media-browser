@@ -1,0 +1,23 @@
+services:
+  server:
+    build:
+      context: ./server
+    environment:
+      BIND_ADDR: 0.0.0.0:6677
+      MEDIA_ROOT: /Users/s_mash/Pictures/Screenshots
+      CORS_ALLOW_ORIGIN: "*"
+    ports:
+      - "6677:6677"
+    volumes:
+      - ./media:/app/media:ro
+
+  web:
+    build:
+      context: ./web
+    environment:
+      VITE_API_BASE_URL: http://localhost:6677
+      INTERNAL_API_BASE_URL: http://server:6677
+    ports:
+      - "9091:9091"
+    depends_on:
+      - server
