@@ -1,12 +1,25 @@
 import type { MediaItem } from '$lib/types';
 
+function encodeRelativePath(relativePath: string): string {
+  return relativePath
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+}
+
 export function mediaUrl(relativePath: string, apiBaseUrl: string): string {
+  const encodedPath = encodeRelativePath(relativePath);
+
+  return `${apiBaseUrl}/media/${encodedPath}`;
+}
+
+export function downloadUrl(relativePath: string, apiBaseUrl: string): string {
   const encodedPath = relativePath
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
 
-  return `${apiBaseUrl}/media/${encodedPath}`;
+  return `${apiBaseUrl}/media/${encodedPath}?download=true`;
 }
 
 export async function fetchMedia(fetchImpl: typeof fetch): Promise<MediaItem[]> {

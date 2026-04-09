@@ -9,13 +9,14 @@ use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{HeaderValue, Response, StatusCode, header},
     response::IntoResponse,
     routing::get,
 };
 use dotenvy::dotenv;
 use mime_guess::mime;
+use serde::Deserialize;
 use serde::Serialize;
 use tokio::fs;
 use tower_http::{cors::{Any, CorsLayer}, trace::TraceLayer};
@@ -38,6 +39,7 @@ struct MediaItem {
     media_type: MediaType,
     mime: String,
     size_bytes: u64,
+    modified_ms: u64,
 }
 
 #[derive(Serialize)]
@@ -45,6 +47,16 @@ struct MediaItem {
 enum MediaType {
     Image,
     Video,
+}
+
+struct MediaClassification {
+    media_type: MediaType,
+    mime: mime::Mime,
+}
+
+#[derive(Deserialize, Default)]
+struct MediaQuery {
+    download: Option<bool>,
 }
 
 #[tokio::main]
@@ -134,6 +146,7 @@ async fn list_media(State(state): State<AppState>) -> impl IntoResponse {
 async fn serve_media(
     State(state): State<AppState>,
     AxumPath(path): AxumPath<String>,
+    Query(query): Query<MediaQuery>,
 ) -> impl IntoResponse {
     let sanitized = match sanitize_relative_path(&path) {
         Some(path) => path,
@@ -141,14 +154,36 @@ async fn serve_media(
     };
 
     let full_path = state.media_root.join(sanitized);
+    if classify_media_path(&full_path).is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
     match fs::read(&full_path).await {
         Ok(bytes) => {
-            let mime = mime_guess::from_path(&full_path).first_or_octet_stream();
+            let media = match classify_media_path(&full_path) {
+                Some(media) => media,
+                None => return StatusCode::NOT_FOUND.into_response(),
+            };
             let mut response = Response::new(Body::from(bytes));
             response.headers_mut().insert(
                 header::CONTENT_TYPE,
-                HeaderValue::from_str(mime.as_ref()).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+                HeaderValue::from_str(media.mime.as_ref())
+                    .unwrap_or(HeaderValue::from_static("application/octet-stream")),
             );
+            if query.download.unwrap_or(false) {
+                let file_name = full_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("download")
+                    .replace('"', "");
+                if let Ok(value) =
+                    HeaderValue::from_str(&format!("attachment; filename=\"{file_name}\""))
+                {
+                    response
+                        .headers_mut()
+                        .insert(header::CONTENT_DISPOSITION, value);
+                }
+            }
             apply_no_cache_headers(response.headers_mut());
             response.into_response()
         }
@@ -172,6 +207,19 @@ fn sanitize_relative_path(path: &str) -> Option<PathBuf> {
     }
 
     Some(clean)
+}
+
+fn classify_media_path(path: &Path) -> Option<MediaClassification> {
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    let media_type = if mime.type_() == mime::IMAGE {
+        Some(MediaType::Image)
+    } else if mime.type_() == mime::VIDEO {
+        Some(MediaType::Video)
+    } else {
+        None
+    }?;
+
+    Some(MediaClassification { media_type, mime })
 }
 
 async fn collect_media(root: &Path) -> Result<Vec<MediaItem>> {
@@ -204,16 +252,7 @@ async fn collect_media_recursive(
             continue;
         }
 
-        let mime = mime_guess::from_path(&path).first_or_octet_stream();
-        let media_type = if mime.type_() == mime::IMAGE {
-            Some(MediaType::Image)
-        } else if mime.type_() == mime::VIDEO {
-            Some(MediaType::Video)
-        } else {
-            None
-        };
-
-        let Some(media_type) = media_type else {
+        let Some(media) = classify_media_path(&path) else {
             continue;
         };
 
@@ -226,9 +265,15 @@ async fn collect_media_recursive(
         items.push(MediaItem {
             name: entry.file_name().to_string_lossy().to_string(),
             relative_path,
-            media_type,
-            mime: mime.to_string(),
+            media_type: media.media_type,
+            mime: media.mime.to_string(),
             size_bytes: metadata.len(),
+            modified_ms: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0),
         });
     }
 

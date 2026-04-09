@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { mediaUrl } from '$lib/api';
+  import { downloadUrl, mediaUrl } from '$lib/api';
   import VideoPlayer from '$lib/components/VideoPlayer.svelte';
   import type { MediaItem } from '$lib/types';
 
@@ -115,6 +115,14 @@
           {#if parentPath(item.relative_path)}
             <p>{parentPath(item.relative_path)}</p>
           {/if}
+          <a
+            class="download-link"
+            href={downloadUrl(item.relative_path, apiBaseUrl)}
+            download={item.name}
+            aria-label={`Download ${item.name}`}
+          >
+            Download
+          </a>
         </div>
       </article>
     {/each}
@@ -166,6 +174,15 @@
           <button class="icon-button close-button" type="button" aria-label="Close viewer" onclick={closeViewer}>
             ×
           </button>
+
+          <a
+            class="icon-button download-button"
+            href={downloadUrl(selectedItem.relative_path, apiBaseUrl)}
+            download={selectedItem.name}
+            aria-label={`Download ${selectedItem.name}`}
+          >
+            ↓
+          </a>
         </div>
       </div>
     </div>
@@ -293,6 +310,21 @@
     word-break: break-word;
   }
 
+  .download-link {
+    display: inline-flex;
+    margin-top: 0.8rem;
+    color: #f0c48c;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+    font-family: "Avenir Next", "Segoe UI", sans-serif;
+  }
+
+  .download-link:hover {
+    color: #fff4e6;
+  }
+
   @media (max-width: 640px) {
     .grid {
       grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -363,6 +395,13 @@
     border-radius: 999px;
     font-size: 1.8rem;
     line-height: 1;
+    text-decoration: none;
+    display: grid;
+    place-items: center;
+  }
+
+  .download-button {
+    right: 4.25rem;
   }
 
   .nav-button {
@@ -416,6 +455,10 @@
     .icon-button {
       top: 0.75rem;
       right: 0.75rem;
+    }
+
+    .download-button {
+      right: 3.85rem;
     }
   }
 </style>
