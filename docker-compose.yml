@@ -6,8 +6,15 @@ services:
       BIND_ADDR: 0.0.0.0:6677
       MEDIA_ROOT: /app/media
       CORS_ALLOW_ORIGIN: "*"
+      RUST_LOG: "local_gallery_server=info,tower_http=warn"
     ports:
       - "6677:6677"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:6677/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
     volumes:
       - type: bind
         source: ${MEDIA_ROOT:-./media}
@@ -25,4 +32,5 @@ services:
     ports:
       - "9091:9091"
     depends_on:
-      - server
+      server:
+        condition: service_healthy

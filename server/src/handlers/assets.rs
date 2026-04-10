@@ -10,6 +10,7 @@ use tracing::error;
 use crate::{
     http_utils::{apply_no_cache_headers, apply_thumbnail_cache_headers},
     models::{MediaQuery, MediaType, ThumbnailOutcome},
+    handlers::api::indexing_response,
     paths::sanitize_relative_path,
     state::AppState,
     thumbnails::{generate_thumbnail, svg_thumbnail_response, thumbnail_cache_path},
@@ -20,6 +21,10 @@ pub async fn serve_media(
     AxumPath(path): AxumPath<String>,
     Query(query): Query<MediaQuery>,
 ) -> impl IntoResponse {
+    if !state.initial_index_ready().await {
+        return indexing_response(&state, StatusCode::SERVICE_UNAVAILABLE).await;
+    }
+
     let Some(sanitized) = sanitize_relative_path(&path) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
@@ -61,6 +66,10 @@ pub async fn serve_thumbnail(
     State(state): State<AppState>,
     AxumPath(path): AxumPath<String>,
 ) -> impl IntoResponse {
+    if !state.initial_index_ready().await {
+        return indexing_response(&state, StatusCode::SERVICE_UNAVAILABLE).await;
+    }
+
     let Some(sanitized) = sanitize_relative_path(&path) else {
         return StatusCode::BAD_REQUEST.into_response();
     };

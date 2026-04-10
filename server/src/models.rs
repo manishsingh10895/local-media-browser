@@ -24,6 +24,14 @@ pub struct FolderNode {
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
+    pub phase: IndexPhase,
+    pub is_ready: bool,
+    pub is_indexing: bool,
+    pub current_job: Option<IndexJob>,
+    pub indexed_media_count: usize,
+    pub last_completed_ms: Option<u64>,
+    pub last_error: Option<String>,
+    pub started_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -81,6 +89,22 @@ pub struct FolderResponse {
     pub limit: usize,
     pub sort_field: &'static str,
     pub sort_direction: &'static str,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IndexPhase {
+    Starting,
+    Indexing,
+    Ready,
+    Error,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IndexJob {
+    Initial,
+    Refresh,
 }
 
 #[derive(Deserialize, Default)]

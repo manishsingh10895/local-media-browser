@@ -4,6 +4,7 @@
   import { fetchFolderResponse, thumbnailUrl } from '$lib/api';
   import GalleryGrid from '$lib/components/GalleryGrid.svelte';
   import type {
+    HealthResponse,
     FolderResponse,
     GridSize,
     MediaItem,
@@ -14,18 +15,37 @@
   let {
     data
   }: {
-    data: {
-      folder: FolderResponse;
-      publicApiBaseUrl: string;
-      apiBaseUrl: string;
-    };
+    data:
+      | {
+          mode: 'ready';
+          folder: FolderResponse;
+          currentPath: string;
+          sortField: SortField;
+          sortDirection: SortDirection;
+          gridSize: GridSize;
+          publicApiBaseUrl: string;
+          apiBaseUrl: string;
+        }
+      | {
+          mode: 'indexing';
+          status: HealthResponse;
+          currentPath: string;
+          sortField: SortField;
+          sortDirection: SortDirection;
+          gridSize: GridSize;
+          publicApiBaseUrl: string;
+          apiBaseUrl: string;
+        };
   } = $props();
+  let folder = $state<FolderResponse | null>(null);
+  let indexingStatus = $state<HealthResponse | null>(null);
   let mediaItems = $state<MediaItem[]>([]);
   let nextOffset = $state<number | null>(null);
   let loadingMore = $state(false);
   let refreshing = $state(false);
   let sentinel = $state<HTMLDivElement | null>(null);
   let observer: IntersectionObserver | null = null;
+  let indexingPollTimer: ReturnType<typeof window.setInterval> | null = null;
 
   function folderLabel(itemCount: number): string {
     return itemCount === 1 ? '1 media item' : `${itemCount} media items`;
@@ -35,22 +55,22 @@
     const params = new URLSearchParams();
     params.set('sort', field);
     params.set('dir', direction);
-    params.set('view', data.folder.grid_size ?? 'comfortable');
+    params.set('view', folder?.grid_size ?? data.gridSize ?? 'comfortable');
     const query = params.toString();
     return query ? `?${query}` : '';
   }
 
   function viewHref(size: GridSize): string {
     const params = new URLSearchParams();
-    params.set('sort', data.folder.sort_field);
-    params.set('dir', data.folder.sort_direction);
+    params.set('sort', folder?.sort_field ?? data.sortField);
+    params.set('dir', folder?.sort_direction ?? data.sortDirection);
     params.set('view', size);
     const query = params.toString();
     return query ? `?${query}` : '';
   }
 
   async function loadMore(): Promise<void> {
-    if (!browser || loadingMore || nextOffset === null) {
+    if (!browser || loadingMore || nextOffset === null || !folder) {
       return;
     }
 
@@ -60,21 +80,24 @@
       const nextPage = await fetchFolderResponse(
         window.fetch.bind(window),
         data.publicApiBaseUrl,
-        data.folder.current_path,
-        data.folder.sort_field,
-        data.folder.sort_direction,
+        folder.current_path,
+        folder.sort_field,
+        folder.sort_direction,
         nextOffset,
-        data.folder.limit
+        folder.limit
       );
-      mediaItems = [...mediaItems, ...nextPage.media];
-      nextOffset = nextPage.next_offset;
+      if (nextPage.kind !== 'ready') {
+        return;
+      }
+      mediaItems = [...mediaItems, ...nextPage.folder.media];
+      nextOffset = nextPage.folder.next_offset;
     } finally {
       loadingMore = false;
     }
   }
 
   async function refreshCurrentFolder(): Promise<void> {
-    if (!browser || refreshing) {
+    if (!browser || refreshing || !folder) {
       return;
     }
 
@@ -84,22 +107,57 @@
       const refreshed = await fetchFolderResponse(
         window.fetch.bind(window),
         data.publicApiBaseUrl,
-        data.folder.current_path,
-        data.folder.sort_field,
-        data.folder.sort_direction,
+        folder.current_path,
+        folder.sort_field,
+        folder.sort_direction,
         0,
-        data.folder.limit
+        folder.limit
       );
-
-      data.folder = {
-        ...refreshed,
-        grid_size: data.folder.grid_size
+      if (refreshed.kind !== 'ready') {
+        indexingStatus = refreshed.status;
+        folder = null;
+        mediaItems = [];
+        nextOffset = null;
+        return;
+      }
+      folder = {
+        ...refreshed.folder,
+        grid_size: folder.grid_size
       };
-      mediaItems = refreshed.media;
-      nextOffset = refreshed.next_offset;
+      mediaItems = refreshed.folder.media;
+      nextOffset = refreshed.folder.next_offset;
     } finally {
       refreshing = false;
     }
+  }
+
+  async function pollUntilReady(): Promise<void> {
+    if (!browser || !indexingStatus) {
+      return;
+    }
+
+    const result = await fetchFolderResponse(
+      window.fetch.bind(window),
+      data.publicApiBaseUrl,
+      data.currentPath,
+      data.sortField,
+      data.sortDirection,
+      0,
+      60
+    );
+
+    if (result.kind === 'indexing') {
+      indexingStatus = result.status;
+      return;
+    }
+
+    folder = {
+      ...result.folder,
+      grid_size: data.gridSize
+    };
+    indexingStatus = null;
+    mediaItems = result.folder.media;
+    nextOffset = result.folder.next_offset;
   }
 
   onMount(() => {
@@ -116,12 +174,32 @@
       observer.observe(sentinel);
     }
 
-    return () => observer?.disconnect();
+    if (browser && indexingStatus) {
+      indexingPollTimer = window.setInterval(() => {
+        void pollUntilReady();
+      }, 2500);
+    }
+
+    return () => {
+      observer?.disconnect();
+      if (indexingPollTimer) {
+        window.clearInterval(indexingPollTimer);
+      }
+    };
   });
 
   $effect(() => {
-    mediaItems = data.folder.media;
-    nextOffset = data.folder.next_offset;
+    if (data.mode === 'ready') {
+      folder = data.folder;
+      indexingStatus = null;
+      mediaItems = data.folder.media;
+      nextOffset = data.folder.next_offset;
+    } else {
+      folder = null;
+      indexingStatus = data.status;
+      mediaItems = [];
+      nextOffset = null;
+    }
   });
 
   $effect(() => {
@@ -130,10 +208,27 @@
       observer.observe(sentinel);
     }
   });
+
+  $effect(() => {
+    if (!browser) {
+      return;
+    }
+
+    if (indexingPollTimer) {
+      window.clearInterval(indexingPollTimer);
+      indexingPollTimer = null;
+    }
+
+    if (indexingStatus) {
+      indexingPollTimer = window.setInterval(() => {
+        void pollUntilReady();
+      }, 2500);
+    }
+  });
 </script>
 
 <svelte:head>
-  <title>{data.folder.current_path ? `${data.folder.current_path} · Local Gallery` : 'Local Gallery'}</title>
+  <title>{folder?.current_path ? `${folder.current_path} · Local Gallery` : indexingStatus ? 'Indexing · Local Gallery' : 'Local Gallery'}</title>
   <meta
     name="description"
     content="Browse images and videos hosted by the local Rust media server."
@@ -143,130 +238,173 @@
 <div class="shell">
   <header class="hero">
     <div class="hero-copy">
-      <nav class="breadcrumbs" aria-label="Breadcrumb">
-        {#each data.folder.breadcrumbs as crumb, index}
-          {#if index > 0}
-            <span class="crumb-separator">/</span>
-          {/if}
-          <a href={crumb.href}>{crumb.name}</a>
-        {/each}
-      </nav>
+      {#if folder}
+        <nav class="breadcrumbs" aria-label="Breadcrumb">
+          {#each folder.breadcrumbs as crumb, index}
+            {#if index > 0}
+              <span class="crumb-separator">/</span>
+            {/if}
+            <a href={crumb.href}>{crumb.name}</a>
+          {/each}
+        </nav>
 
-      <h2>{data.folder.current_path ? data.folder.current_path.split('/').at(-1) : 'Local Media Browser'}</h2>
-      <p class="lede">
-        {#if data.folder.current_path}
-          Browsing this folder and its immediate media items.
-        {:else}
-          Browse folders first or open media directly from the root collection.
-        {/if}
-      </p>
+        <h2>{folder.current_path ? folder.current_path.split('/').at(-1) : 'Local Media Browser'}</h2>
+        <p class="lede">
+          {#if folder.current_path}
+            Browsing this folder and its immediate media items.
+          {:else}
+            Browse folders first or open media directly from the root collection.
+          {/if}
+        </p>
+      {:else}
+        <span class="status-chip">Server Live</span>
+        <h2>Indexing Media Library</h2>
+        <p class="lede">
+          The server is up and scanning your media folder. This page updates automatically when the initial index is ready.
+        </p>
+      {/if}
     </div>
 
     <div class="hero-panel">
-      <span class="panel-label">Current View</span>
-      <strong>{data.folder.folders.length + data.folder.total_media_count}</strong>
-      <p>
-        {data.folder.folders.length} {data.folder.folders.length === 1 ? 'folder' : 'folders'} ·
-        {data.folder.total_media_count} {data.folder.total_media_count === 1 ? 'media item' : 'media items'}
-      </p>
+      {#if folder}
+        <span class="panel-label">Current View</span>
+        <strong>{folder.folders.length + folder.total_media_count}</strong>
+        <p>
+          {folder.folders.length} {folder.folders.length === 1 ? 'folder' : 'folders'} ·
+          {folder.total_media_count} {folder.total_media_count === 1 ? 'media item' : 'media items'}
+        </p>
+      {:else if indexingStatus}
+        <span class="panel-label">Index Status</span>
+        <strong>{indexingStatus.phase}</strong>
+        <p>
+          {indexingStatus.current_job ?? 'initial'} job · {indexingStatus.indexed_media_count} indexed
+        </p>
+      {/if}
     </div>
   </header>
 
-  <section class="folder-section">
-    <div class="section-header">
-      <h3>Folders</h3>
-      <div class="sort-controls">
-        <label>
-          <span>Sort</span>
-          <select onchange={(event) => (window.location.href = sortHref(event.currentTarget.value as SortField, data.folder.sort_direction))}>
-            <option value="name" selected={data.folder.sort_field === 'name'}>Name</option>
-            <option value="date" selected={data.folder.sort_field === 'date'}>Date</option>
-            <option value="size" selected={data.folder.sort_field === 'size'}>Size</option>
-          </select>
-        </label>
-
-        <a class="direction-toggle" href={sortHref(data.folder.sort_field, data.folder.sort_direction === 'asc' ? 'desc' : 'asc')}>
-          {data.folder.sort_direction === 'asc' ? 'Ascending' : 'Descending'}
-        </a>
+  {#if !folder && indexingStatus}
+    <section class="indexing-panel">
+      <div class="indexing-copy">
+        <h3>Preparing your library</h3>
+        <p>The backend is scanning the media root. Large folders on Docker Desktop, especially on Windows, can take time on the first pass.</p>
       </div>
-    </div>
+      <dl class="indexing-stats">
+        <div>
+          <dt>Phase</dt>
+          <dd>{indexingStatus.phase}</dd>
+        </div>
+        <div>
+          <dt>Job</dt>
+          <dd>{indexingStatus.current_job ?? 'initial'}</dd>
+        </div>
+        <div>
+          <dt>Indexed</dt>
+          <dd>{indexingStatus.indexed_media_count}</dd>
+        </div>
+      </dl>
+      {#if indexingStatus.last_error}
+        <p class="indexing-error">{indexingStatus.last_error}</p>
+      {/if}
+    </section>
+  {:else if folder}
+    {@const currentFolder = folder}
+    <section class="folder-section">
+      <div class="section-header">
+        <h3>Folders</h3>
+        <div class="sort-controls">
+          <label>
+            <span>Sort</span>
+            <select onchange={(event) => (window.location.href = sortHref(event.currentTarget.value as SortField, currentFolder.sort_direction))}>
+              <option value="name" selected={currentFolder.sort_field === 'name'}>Name</option>
+              <option value="date" selected={currentFolder.sort_field === 'date'}>Date</option>
+              <option value="size" selected={currentFolder.sort_field === 'size'}>Size</option>
+            </select>
+          </label>
 
-    {#if data.folder.folders.length > 0}
-      <div class="folder-grid">
-        {#each data.folder.folders as folder}
-          <a class="folder-card" href={`/${folder.relative_path}`}>
-            <div class="folder-cover">
-              {#if folder.cover}
-                <img
-                  src={thumbnailUrl(folder.cover.relative_path, data.publicApiBaseUrl, folder.cover.modified_ms)}
-                  alt={folder.name}
-                />
-              {:else}
-                <div class="folder-icon" aria-hidden="true">◫</div>
-              {/if}
-            </div>
-            <div class="folder-meta">
-              <h4>{folder.name}</h4>
-              <p>{folderLabel(folder.item_count)}</p>
-            </div>
+          <a class="direction-toggle" href={sortHref(currentFolder.sort_field, currentFolder.sort_direction === 'asc' ? 'desc' : 'asc')}>
+            {currentFolder.sort_direction === 'asc' ? 'Ascending' : 'Descending'}
           </a>
-        {/each}
-      </div>
-    {:else}
-      <div class="empty-inline">
-        <p>No child folders in this location.</p>
-      </div>
-    {/if}
-  </section>
-
-  <section class="media-section">
-    <div class="section-header">
-      <h3>Media</h3>
-      <div class="media-toolbar">
-        <button
-          type="button"
-          class="refresh-button"
-          onclick={refreshCurrentFolder}
-          disabled={refreshing}
-        >
-          {refreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
-
-        <div class="view-controls" aria-label="Grid size">
-          <span>View</span>
-          <a class:active={data.folder.grid_size === 'compact'} href={viewHref('compact')}>Compact</a>
-          <a class:active={data.folder.grid_size === 'comfortable'} href={viewHref('comfortable')}>Comfortable</a>
-          <a class:active={data.folder.grid_size === 'large'} href={viewHref('large')}>Large</a>
         </div>
       </div>
-    </div>
 
-    <GalleryGrid
-      items={mediaItems}
-      apiBaseUrl={data.publicApiBaseUrl}
-      gridSize={data.folder.grid_size ?? 'comfortable'}
-    />
+      {#if currentFolder.folders.length > 0}
+        <div class="folder-grid">
+          {#each currentFolder.folders as child}
+            <a class="folder-card" href={`/${child.relative_path}`}>
+              <div class="folder-cover">
+                {#if child.cover}
+                  <img
+                    src={thumbnailUrl(child.cover.relative_path, data.publicApiBaseUrl, child.cover.modified_ms)}
+                    alt={child.name}
+                  />
+                {:else}
+                  <div class="folder-icon" aria-hidden="true">◫</div>
+                {/if}
+              </div>
+              <div class="folder-meta">
+                <h4>{child.name}</h4>
+                <p>{folderLabel(child.item_count)}</p>
+              </div>
+            </a>
+          {/each}
+        </div>
+      {:else}
+        <div class="empty-inline">
+          <p>No child folders in this location.</p>
+        </div>
+      {/if}
+    </section>
 
-    {#if nextOffset !== null}
-      <div class="load-more-zone" bind:this={sentinel}>
-        <p>{loadingMore ? 'Loading more media...' : 'Scroll to load more'}</p>
-        <button type="button" class="load-more-button" onclick={loadMore} disabled={loadingMore}>
-          {loadingMore ? 'Loading…' : 'Load more'}
-        </button>
+    <section class="media-section">
+      <div class="section-header">
+        <h3>Media</h3>
+        <div class="media-toolbar">
+          <button
+            type="button"
+            class="refresh-button"
+            onclick={refreshCurrentFolder}
+            disabled={refreshing}
+          >
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </button>
+
+          <div class="view-controls" aria-label="Grid size">
+            <span>View</span>
+            <a class:active={currentFolder.grid_size === 'compact'} href={viewHref('compact')}>Compact</a>
+            <a class:active={currentFolder.grid_size === 'comfortable'} href={viewHref('comfortable')}>Comfortable</a>
+            <a class:active={currentFolder.grid_size === 'large'} href={viewHref('large')}>Large</a>
+          </div>
+        </div>
       </div>
-    {/if}
-  </section>
 
-  <div class="mobile-refresh">
-    <button
-      type="button"
-      class="refresh-button mobile-refresh-button"
-      onclick={refreshCurrentFolder}
-      disabled={refreshing}
-    >
-      {refreshing ? 'Refreshing…' : 'Refresh'}
-    </button>
-  </div>
+      <GalleryGrid
+        items={mediaItems}
+        apiBaseUrl={data.publicApiBaseUrl}
+        gridSize={currentFolder.grid_size ?? 'comfortable'}
+      />
+
+      {#if nextOffset !== null}
+        <div class="load-more-zone" bind:this={sentinel}>
+          <p>{loadingMore ? 'Loading more media...' : 'Scroll to load more'}</p>
+          <button type="button" class="load-more-button" onclick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      {/if}
+    </section>
+
+    <div class="mobile-refresh">
+      <button
+        type="button"
+        class="refresh-button mobile-refresh-button"
+        onclick={refreshCurrentFolder}
+        disabled={refreshing}
+      >
+        {refreshing ? 'Refreshing…' : 'Refresh'}
+      </button>
+    </div>
+  {/if}
 
   <!--
   {#if data.folders.length > 0}
@@ -446,6 +584,70 @@
     color: #acc0ce;
     font-size: 0.92rem;
     line-height: 1.55;
+  }
+
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    margin-bottom: 0.9rem;
+    padding: 0.32rem 0.7rem;
+    border-radius: 999px;
+    background: rgba(244, 179, 107, 0.12);
+    color: #f4c98f;
+    font-size: 0.78rem;
+    font-family: "Avenir Next", "Segoe UI", sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .indexing-panel {
+    padding: 1.35rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 1.3rem;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
+      rgba(8, 18, 27, 0.84);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
+  }
+
+  .indexing-copy h3 {
+    margin: 0;
+    color: #fff4e6;
+    font-size: 1.2rem;
+  }
+
+  .indexing-copy p,
+  .indexing-error {
+    color: #acc0ce;
+    line-height: 1.6;
+  }
+
+  .indexing-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem;
+    margin: 1.2rem 0 0;
+  }
+
+  .indexing-stats div {
+    padding: 0.9rem 1rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .indexing-stats dt {
+    margin-bottom: 0.3rem;
+    color: #8fa8b8;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-family: "Avenir Next", "Segoe UI", sans-serif;
+  }
+
+  .indexing-stats dd {
+    margin: 0;
+    color: #f7f4ef;
+    font-size: 1.05rem;
   }
 
   .folder-section,

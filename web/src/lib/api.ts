@@ -1,4 +1,4 @@
-import type { FolderResponse, SortDirection, SortField } from '$lib/types';
+import type { FolderFetchResult, HealthResponse, SortDirection, SortField } from '$lib/types';
 
 function encodeRelativePath(relativePath: string): string {
   return relativePath
@@ -52,14 +52,28 @@ export async function fetchFolderResponse(
   sortDirection: SortDirection,
   offset = 0,
   limit = 60
-): Promise<FolderResponse> {
+): Promise<FolderFetchResult> {
   const response = await fetchImpl(
     `${apiBaseUrl}${folderApiPath(currentPath, sortField, sortDirection, offset, limit)}`
   );
+
+  if (response.status === 503) {
+    return {
+      kind: 'indexing',
+      status: (await response.json()) as HealthResponse
+    };
+  }
+
+  if (response.status === 404) {
+    throw new Error('NOT_FOUND');
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to fetch folder: ${response.status}`);
   }
 
-  return (await response.json()) as FolderResponse;
+  return {
+    kind: 'ready',
+    folder: (await response.json()) as import('$lib/types').FolderResponse
+  };
 }

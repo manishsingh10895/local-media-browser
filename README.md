@@ -4,6 +4,7 @@ Local Gallery is a LAN-friendly media browser built with:
 
 - Rust + `axum` backend
 - SvelteKit frontend
+- optional Axum-rendered SSR frontend
 - optional Docker Compose setup
 
 It is designed to serve a local media directory over your local network and browse it from desktop or mobile devices.
@@ -38,12 +39,36 @@ It now works like this:
 
 This is intended to scale better for large libraries than rescanning and returning the whole tree on every page load.
 
+The backend can now run in two frontend modes:
+
+- `FRONTEND_MODE=svelte`: Rust serves the API/media/thumbnail routes, and SvelteKit serves the UI
+- `FRONTEND_MODE=axum`: Rust also serves an Axum-rendered HTML UI directly on the backend port
+
+The default is `svelte`.
+
 ## Project structure
 
 - `server/` Rust backend
 - `web/` SvelteKit frontend
 - `media/` optional local media folder for development
 - `docker-compose.yml` combined container setup
+
+### Server structure
+
+The Rust backend has been refactored into smaller modules:
+
+- `server/src/main.rs`: startup and router wiring
+- `server/src/config.rs`: env parsing, runtime config, frontend mode, sort/view enums
+- `server/src/models.rs`: shared API/index data types
+- `server/src/state.rs`: shared app state
+- `server/src/indexer.rs`: media scanning, index building, watcher refresh
+- `server/src/handlers/api.rs`: `/api/*` handlers
+- `server/src/handlers/assets.rs`: `/media/*` and `/thumbs/*` handlers
+- `server/src/responses.rs`: folder response assembly
+- `server/src/paths.rs`: path sanitizing, breadcrumbs, URL helpers
+- `server/src/sorting.rs`: folder/media sorting
+- `server/src/thumbnails.rs`: thumbnail generation and fallback SVG responses
+- `server/src/frontend/`: Axum SSR frontend renderer and styles
 
 ## Default ports
 
@@ -112,6 +137,7 @@ Edit `server/.env` and set the media folder you want to serve:
 ```env
 BIND_ADDR=0.0.0.0:6677
 MEDIA_ROOT=/absolute/path/to/your/media/folder
+FRONTEND_MODE=svelte
 CORS_ALLOW_ORIGIN=*
 ```
 
@@ -153,14 +179,40 @@ Another device on the same network:
 http://192.168.1.25:6677/api/health
 ```
 
-### 3. Install frontend dependencies
+### 3. Run Axum-only SSR instead of SvelteKit
+
+If you want the Rust server to render the UI directly, set:
+
+```env
+FRONTEND_MODE=axum
+```
+
+Then run:
+
+```bash
+cd server
+cargo run
+```
+
+Open:
+
+- same machine: `http://localhost:6677`
+- another device on the LAN: `http://192.168.1.25:6677`
+
+Notes:
+
+- the server should still bind to `0.0.0.0:6677`
+- clients should use `localhost` or your real LAN IP, not `0.0.0.0`
+- in Axum SSR mode, you do not need to run the Svelte frontend at all
+
+### 4. Install frontend dependencies
 
 ```bash
 cd web
 npm install
 ```
 
-### 4. Optional frontend env file
+### 5. Optional frontend env file
 
 You usually do not need a frontend env file for local LAN use, because the frontend derives the public API host from the browser request.
 
@@ -175,7 +227,7 @@ Useful frontend env values:
 - `INTERNAL_API_BASE_URL`: server-side fetch URL used by SvelteKit
 - `PUBLIC_API_BASE_URL`: explicit browser-facing backend URL override
 
-### 5. Start the frontend
+### 6. Start the frontend
 
 ```bash
 cd web
@@ -193,6 +245,8 @@ Another device on the LAN:
 ```text
 http://192.168.1.25:9091
 ```
+
+Use this only when `FRONTEND_MODE=svelte`.
 
 ## Run with Docker Compose
 
@@ -322,6 +376,11 @@ Current browser-facing backend routes:
 - `GET /media/{path}`
 - `GET /thumbs/{path}`
 
+When `FRONTEND_MODE=axum`, the backend also serves:
+
+- `GET /`
+- `GET /{path}`
+
 ### Folder endpoint query params
 
 `/api/folder` and `/api/folder/{path}` support:
@@ -351,6 +410,13 @@ cargo check
 cargo run
 ```
 
+Backend with Axum SSR:
+
+```bash
+cd server
+FRONTEND_MODE=axum cargo run
+```
+
 Frontend:
 
 ```bash
@@ -378,6 +444,30 @@ The app now handles large libraries better than the original implementation beca
 - thumbnails are used in the grid instead of original full-size media
 
 ## Troubleshooting
+
+### I want Axum-only SSR on my LAN
+
+Set:
+
+```env
+BIND_ADDR=0.0.0.0:6677
+FRONTEND_MODE=axum
+```
+
+Then run:
+
+```bash
+cd server
+cargo run
+```
+
+Open from another device using:
+
+```text
+http://<your-lan-ip>:6677
+```
+
+Do not use `0.0.0.0` in the browser URL.
 
 ### Frontend loads but media does not show on another device
 

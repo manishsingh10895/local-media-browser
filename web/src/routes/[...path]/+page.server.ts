@@ -2,7 +2,7 @@ import { env } from '$env/dynamic/private';
 import { error } from '@sveltejs/kit';
 
 import { fetchFolderResponse } from '$lib/api';
-import type { FolderResponse, GridSize, SortDirection, SortField } from '$lib/types';
+import type { GridSize, SortDirection, SortField } from '$lib/types';
 
 const DEFAULT_INTERNAL_API_BASE_URL = 'http://localhost:6677';
 const DEFAULT_PUBLIC_API_PORT = '6677';
@@ -36,10 +36,8 @@ export async function load({ fetch, url, params }) {
   const sortField = parseSortField(url.searchParams.get('sort'));
   const sortDirection = parseSortDirection(url.searchParams.get('dir'));
   const gridSize = parseGridSize(url.searchParams.get('view'));
-  let folder: FolderResponse;
-
   try {
-    folder = await fetchFolderResponse(
+    const result = await fetchFolderResponse(
       fetch,
       apiBaseUrl,
       currentPath,
@@ -48,16 +46,37 @@ export async function load({ fetch, url, params }) {
       0,
       60
     );
-  } catch {
-    throw error(404, 'Folder not found');
-  }
 
-  return {
-    folder: {
-      ...folder,
-      grid_size: gridSize
-    },
-    publicApiBaseUrl,
-    apiBaseUrl: publicApiBaseUrl
-  };
+    if (result.kind === 'indexing') {
+      return {
+        mode: 'indexing' as const,
+        status: result.status,
+        currentPath,
+        sortField,
+        sortDirection,
+        gridSize,
+        publicApiBaseUrl,
+        apiBaseUrl: publicApiBaseUrl
+      };
+    }
+
+    return {
+      mode: 'ready' as const,
+      folder: {
+        ...result.folder,
+        grid_size: gridSize
+      },
+      currentPath,
+      sortField,
+      sortDirection,
+      gridSize,
+      publicApiBaseUrl,
+      apiBaseUrl: publicApiBaseUrl
+    };
+  } catch (err) {
+    if (err instanceof Error && err.message === 'NOT_FOUND') {
+      throw error(404, 'Folder not found');
+    }
+    throw error(503, 'Media server is unavailable');
+  }
 }

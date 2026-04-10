@@ -1,15 +1,16 @@
 use std::{
     path::Path,
+    time::Instant,
     time::{Duration, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
 use notify::{RecursiveMode, Watcher};
 use tokio::fs;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::{
-    models::{FolderNode, MediaIndex, MediaItem},
+    models::{FolderNode, IndexJob, MediaIndex, MediaItem},
     paths::{ancestor_paths, classify_media_path, folder_name, parent_folder_path},
     state::AppState,
 };
@@ -31,6 +32,12 @@ pub async fn rebuild_media_index(state: &AppState) -> Result<()> {
     Ok(())
 }
 
+pub fn spawn_initial_index(state: AppState) {
+    tokio::spawn(async move {
+        run_index_job(state, IndexJob::Initial).await;
+    });
+}
+
 pub fn start_media_watcher(state: AppState) -> Result<()> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let media_root = state.media_root.clone();
@@ -50,15 +57,61 @@ pub fn start_media_watcher(state: AppState) -> Result<()> {
         while rx.recv().await.is_some() {
             tokio::time::sleep(Duration::from_millis(300)).await;
             while rx.try_recv().is_ok() {}
-            if let Err(error) = rebuild_media_index(&state).await {
-                error!("failed to rebuild media index: {error:#}");
-            } else {
-                info!("media index refreshed");
-            }
+            run_index_job(state.clone(), IndexJob::Refresh).await;
         }
     });
 
     Ok(())
+}
+
+async fn run_index_job(state: AppState, job: IndexJob) {
+    let _guard = state.index_run_lock.lock().await;
+    let started_at_ms = now_ms();
+    let started_at = Instant::now();
+
+    {
+        let mut status = state.status.write().await;
+        status.mark_indexing(job, started_at_ms);
+    }
+
+    match job {
+        IndexJob::Initial => info!("initial indexing started"),
+        IndexJob::Refresh => info!("watcher refresh indexing started"),
+    }
+
+    match rebuild_media_index(&state).await {
+        Ok(()) => {
+            let indexed_media_count = state.index.read().await.media_by_path.len();
+            let completed_at_ms = now_ms();
+            {
+                let mut status = state.status.write().await;
+                status.mark_ready(indexed_media_count, completed_at_ms);
+            }
+            match job {
+                IndexJob::Initial => info!(
+                    indexed_media_count,
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    "initial indexing completed"
+                ),
+                IndexJob::Refresh => info!(
+                    indexed_media_count,
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    "watcher refresh completed"
+                ),
+            }
+        }
+        Err(err) => {
+            let message = format!("{err:#}");
+            {
+                let mut status = state.status.write().await;
+                status.mark_error(job, message.clone());
+            }
+            match job {
+                IndexJob::Initial => error!(error = message, "initial indexing failed"),
+                IndexJob::Refresh => warn!(error = message, "watcher refresh failed"),
+            }
+        }
+    }
 }
 
 pub fn build_media_index(items: Vec<MediaItem>) -> MediaIndex {
@@ -161,4 +214,11 @@ fn build_media_item(
             .map(|duration| duration.as_millis() as u64)
             .unwrap_or(0),
     })
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }

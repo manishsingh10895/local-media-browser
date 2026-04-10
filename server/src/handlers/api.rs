@@ -13,8 +13,8 @@ use crate::{
     state::AppState,
 };
 
-pub async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse { status: "ok" })
+pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
+    Json(state.health_response().await)
 }
 
 pub async fn get_folder_root(
@@ -36,6 +36,10 @@ pub async fn get_folder(
 }
 
 async fn folder_response(state: AppState, current_path: String, query: FolderQuery) -> Response {
+    if !state.initial_index_ready().await {
+        return indexing_response(&state, StatusCode::SERVICE_UNAVAILABLE).await;
+    }
+
     match build_folder_response(state, current_path, query).await {
         Ok(payload) => {
             let mut response = Json(payload).into_response();
@@ -44,4 +48,11 @@ async fn folder_response(state: AppState, current_path: String, query: FolderQue
         }
         Err(status) => status.into_response(),
     }
+}
+
+pub async fn indexing_response(state: &AppState, status_code: StatusCode) -> Response {
+    let payload = state.current_status().await;
+    let mut response = (status_code, Json(payload)).into_response();
+    apply_no_cache_headers(response.headers_mut());
+    response
 }

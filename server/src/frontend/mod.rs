@@ -13,7 +13,7 @@ use maud::{DOCTYPE, Markup, html};
 use crate::{
     config::{FrontendMode, GridSize, parse_grid_size, parse_sort_direction},
     http_utils::apply_no_cache_headers,
-    models::{FolderQuery, FolderResponse},
+    models::{FolderQuery, FolderResponse, HealthResponse},
     paths::{media_download_route, media_route, sanitize_relative_path, sort_direction_label, thumbnail_route, url_for_folder},
     responses::build_folder_response,
     state::AppState,
@@ -46,6 +46,10 @@ async fn render_path(
 async fn render_folder_page(state: AppState, current_path: String, query: FolderQuery) -> Response<Body> {
     let grid_size = parse_grid_size(query.view.as_deref());
     let offset = query.offset.unwrap_or(0);
+    if !state.initial_index_ready().await {
+        return render_indexing_page(state, grid_size).await;
+    }
+
     match build_folder_response(state.clone(), current_path, query).await {
         Ok(folder) => {
             let markup = render_axum_frontend(&folder, state.frontend_mode, grid_size, offset, state.media_root.display().to_string());
@@ -55,6 +59,14 @@ async fn render_folder_page(state: AppState, current_path: String, query: Folder
         }
         Err(status) => status.into_response(),
     }
+}
+
+async fn render_indexing_page(state: AppState, grid_size: GridSize) -> Response<Body> {
+    let status = state.current_status().await;
+    let markup = render_axum_indexing(&status, state.frontend_mode, state.media_root.display().to_string(), grid_size);
+    let mut response = (StatusCode::SERVICE_UNAVAILABLE, markup).into_response();
+    apply_no_cache_headers(response.headers_mut());
+    response
 }
 
 fn render_axum_frontend(
@@ -85,6 +97,49 @@ fn render_axum_frontend(
                     (render_controls(folder, grid_size))
                     (render_folders(folder, grid_size))
                     (render_media(folder, grid_size, offset))
+                }
+            }
+        }
+    }
+}
+
+fn render_axum_indexing(
+    status: &HealthResponse,
+    frontend_mode: FrontendMode,
+    media_root_label: String,
+    grid_size: GridSize,
+) -> Markup {
+    html! {
+        (DOCTYPE)
+        html lang="en" {
+            head {
+                meta charset="utf-8";
+                meta name="viewport" content="width=device-width, initial-scale=1";
+                title { "Indexing · Local Gallery" }
+                meta http-equiv="refresh" content="3";
+                style { (style::AXUM_FRONTEND_CSS) }
+            }
+            body {
+                main class="shell" {
+                    header class="hero" {
+                        div class="hero-copy" {
+                            h1 { "Indexing Media Library" }
+                            p class="lede" { "The server is running and scanning your media folder. This page refreshes automatically." }
+                        }
+                        div class="hero-panel" {
+                            span class="panel-label" { "Frontend" }
+                            strong { (frontend_mode.as_str()) }
+                            p { "Media root: " (media_root_label) }
+                        }
+                    }
+                    section class="controls" {
+                        p class="empty-note" { "Phase: " (match status.phase { crate::models::IndexPhase::Starting => "starting", crate::models::IndexPhase::Indexing => "indexing", crate::models::IndexPhase::Ready => "ready", crate::models::IndexPhase::Error => "error" }) }
+                        p class="empty-note" { "Indexed items so far: " (status.indexed_media_count) }
+                        @if let Some(error) = &status.last_error {
+                            p class="empty-note" { "Last error: " (error) }
+                        }
+                        p class="empty-note" { "Preferred view after indexing: " (grid_size.as_str()) }
+                    }
                 }
             }
         }

@@ -26,6 +26,8 @@ export interface BreadcrumbItem {
 export type SortField = 'name' | 'date' | 'size';
 export type SortDirection = 'asc' | 'desc';
 export type GridSize = 'compact' | 'comfortable' | 'large';
+export type IndexPhase = 'starting' | 'indexing' | 'ready' | 'error';
+export type IndexJob = 'initial' | 'refresh';
 
 export interface FolderResponse {
   current_path: string;
@@ -39,3 +41,25 @@ export interface FolderResponse {
   sort_direction: SortDirection;
   grid_size?: GridSize;
 }
+
+export interface HealthResponse {
+  status: 'indexing' | 'ready' | 'error';
+  phase: IndexPhase;
+  is_ready: boolean;
+  is_indexing: boolean;
+  current_job: IndexJob | null;
+  indexed_media_count: number;
+  last_completed_ms: number | null;
+  last_error: string | null;
+  started_at_ms: number | null;
+}
+
+export type FolderFetchResult =
+  | {
+      kind: 'ready';
+      folder: FolderResponse;
+    }
+  | {
+      kind: 'indexing';
+      status: HealthResponse;
+    };
